@@ -1,0 +1,21 @@
+values:
+  - name: Volumes
+    display_name: |
+      Comma separated list of volumes to mount. These are Fuzzball volume references
+      such as `volume://user/persistent`. By default the example volume would be available
+      as `user/persistent` in the file browser. If you would like to use a custom path for
+      a particular volume in the file browser, you can specify it like this:
+      `volume://user/persistent:/custom/path`. The leading slash is optional.
+    string_value: "volume://user/persistent:data"
+
+  - name: Container
+    display_name: CloudCommander container
+    string_value: "docker://coderaiser/cloudcmd:19.0.13-alpine"
+    display_category: Container
+  - name: "ServiceScope"
+    display_name: |
+      [required] Who can access the CloudCommander service. Defaults to 'group'
+    string_value: group
+    options_input:
+      options: [user, group, organization, public]
+    display_category: "Access"
