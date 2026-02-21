@@ -1,0 +1,49 @@
+Bootstrap: docker
+From: rockylinux/rockylinux:9
+
+%post
+
+(
+    curl -L https://raw.githubusercontent.com/TurboVNC/repo/main/TurboVNC.repo
+    echo "exclude=turbovnc-*.*.9[0-9]-*"
+) >/etc/yum.repos.d/TurboVNC.repo
+
+dnf upgrade -y
+dnf install -y epel-release && crb enable
+dnf groupinstall -y Xfce --exclude=xfce4-power-manager
+dnf -y install procps-ng perl turbovnc novnc firefox \
+  baobab openssh-clients tree vim-enhanced ripgrep curl wget which bash awscli2 \
+  jq jello python3.12 ca-certificates \
+  java-21-openjdk iputils bind-utils \
+  nvtop htop procps-ng bat ripgrep fzf
+dnf clean all -y
+rm /etc/xdg/autostart/xfce-polkit.desktop
+
+cat >/etc/xdg/xfce4/xfconf/xfce-perchannel-xml/xfce4-screensaver.xml <<__EOF__
+<?xml version="1.0" encoding="UTF-8"?>
+
+<channel name="xfce4-screensaver" version="1.0">
+  <property name="lock" type="empty">
+    <property name="sleep-activation" type="bool" value="false"/>
+    <property name="enabled" type="bool" value="false"/>
+  </property>
+  <property name="saver" type="empty">
+    <property name="mode" type="int" value="0"/>
+  </property>
+</channel>
+__EOF__
+
+cat >/usr/local/bin/start-vncserver.sh <<'__EOF__'
+/usr/bin/novnc_proxy --vnc localhost:5900 --listen ${1:-6080} &
+PROXY=$?
+/opt/TurboVNC/bin/vncserver -securitytypes tlsnone,x509none,none -wm xfce -fg ${VNCSERVER_ARGS} :0
+kill $PROXY
+__EOF__
+
+%runscript
+
+
+
+
+
+
