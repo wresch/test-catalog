@@ -1,0 +1,65 @@
+
+{{- $datavol := trim .DataVolume }}
+{{- $homevol := trim .HomeVolume }}
+{{- $datamount := "/data" }}
+{{- $home := "/fbhome" }}
+{{- if not $homevol }}
+  {{ $home = "/tmp/fbhome" }}
+{{- end }}
+{{- $port := randInt 10000 32000 }}
+
+version: v1
+
+{{- if (or $datavol $homevol) }}
+volumes:
+  {{- if $datavol }}
+  data:
+    reference: {{ $datavol }}
+  {{- end }}
+  {{- if $homevol }}
+  home:
+    reference: {{ $homevol }}
+  {{- end }}
+{{- end }}
+
+services:
+  desktop:
+{{- if (or $datavol $homevol) }}
+    mounts:
+  {{- if $datavol }}
+      data:
+        location: {{ $datamount }}
+  {{- end }}
+  {{- if $homevol }}
+      home:
+        location: {{ $home }}
+  {{- end }}
+{{- end }}
+    persist: true
+    network:
+      ports:
+        - name: vnc-port
+          protocol: tcp
+          port: {{ $port }}
+      endpoints:
+        - name: vnc
+          port-name: vnc-port
+          protocol: http
+          type: subdomain
+          scope: user
+    env:
+      - HOME={{ $home }}
+    image:
+      uri: oras://depot.ciq.com/fuzzball/fuzzball-applications/xfce4-desktop.sif
+      secret: {{ .DepotSecret }}
+    script: |
+      #! /bin/sh
+      mkdir -p "$HOME"
+      /usr/local/bin/start-vncserver.sh {{ $port }}
+    resource:
+      cpu:
+        cores: {{ .Cores }}
+      memory:
+        size: {{ .Memory }}
+      exclusive: {{ .Exclusive }}
+

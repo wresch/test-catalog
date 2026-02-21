@@ -1,0 +1,252 @@
+name: Build Apptainer Containers
+
+on:
+  workflow_dispatch:
+    inputs:
+      push_to_registry:
+        description: 'Push containers to GitHub Container Registry'
+        required: true
+        type: boolean
+        default: false
+      push_artifact:
+        description: 'Push to artifact (iff not pushing to registry)'
+        required: true
+        type: boolean
+        default: false
+      application:
+        description: 'Specific application to build (leave empty for all)'
+        required: false
+        type: string
+        default: ''
+
+concurrency:
+  group: build-containers-${{ github.ref }}
+  cancel-in-progress: false
+
+env:
+  REGISTRY: ghcr.io
+
+jobs:
+  discover:
+    name: Discover changed definition files
+    runs-on: ubuntu-latest
+    outputs:
+      matrix: ${{ steps.set-matrix.outputs.matrix }}
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Find changed definition files
+        id: set-matrix
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          APP_INPUT: ${{ github.event.inputs.application }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          # Determine search path
+          if [[ "${APP_INPUT:-none}" != "none" ]]; then
+            search_path="applications/${APP_INPUT}/definition_files"
+          else
+            search_path="applications/*/definition_files"
+          fi
+
+          # Find the last successful run on main to use as the diff baseline
+          LAST_SHA=$(gh api \
+            "repos/${GH_REPO}/actions/workflows/build-containers.yaml/runs?status=success&branch=main&per_page=1" \
+            --jq '.workflow_runs[0].head_sha // empty')
+
+          if [[ "${LAST_SHA:-none}" != "none" ]] && git cat-file -e "${LAST_SHA}^{commit}" 2>/dev/null; then
+            echo "Diffing against last successful main build: $LAST_SHA"
+            # git diff pathspecs handle globs natively
+            mapfile -t files < <(git diff --name-only "$LAST_SHA" HEAD -- ":(glob)${search_path}/*.def" 2>/dev/null || true)
+            if [[ ${#files[@]} -eq 0 ]]; then
+              echo "No definition files changed since last successful build on main"
+              echo "matrix={\"include\":[]}" >> $GITHUB_OUTPUT
+              exit 0
+            fi
+          else
+            echo "No previous successful main build found — building all"
+            if [[ "${APP_INPUT:-none}" != "none" ]]; then
+              mapfile -t files < <(find "$search_path" -name "*.def" 2>/dev/null || true)
+            else
+              mapfile -t files < <(find applications -path "*/definition_files/*.def" 2>/dev/null || true)
+            fi
+          fi
+
+          if [[ ${#files[@]} -eq 0 ]]; then
+            echo "No definition files found"
+            echo "matrix={\"include\":[]}" >> $GITHUB_OUTPUT
+            exit 0
+          fi
+
+          # Build JSON array for matrix (cross-product with architectures)
+          matrix_json='{"include":['
+          first="true"
+          for file in "${files[@]}"; do
+            IFS='/' read -ra parts <<< "${file}"
+            if [[ ${#parts[@]} -ne 4 ]]; then
+              echo "'${file}' does not fit the pattern - skipping"
+              continue
+            fi
+            app_name="${parts[1]}"
+            recipe_name="$(basename "${parts[3]}" .def)"
+
+            for arch in amd64 arm64; do
+              if [[ "$first" == "true" ]]; then
+                first="false"
+              else
+                matrix_json+=','
+              fi
+
+              matrix_json+="{\"def_file\":\"$file\",\"app_name\":\"$app_name\",\"recipe_name\":\"$recipe_name\",\"arch\":\"$arch\"}"
+            done
+          done
+          matrix_json+=']}'
+
+          echo "matrix=$matrix_json" >> $GITHUB_OUTPUT
+          echo "Changed definition files:"
+          echo "$matrix_json" | jq .
+
+  build:
+    name: Build ${{ matrix.recipe_name }} (${{ matrix.arch }})
+    needs: discover
+    if: needs.discover.outputs.matrix != '{"include":[]}'
+    runs-on: ${{ matrix.arch == 'arm64' && 'ubuntu-24.04-arm64' || 'ubuntu-latest' }}
+    strategy:
+      fail-fast: false
+      matrix: ${{ fromJson(needs.discover.outputs.matrix) }}
+
+    permissions:
+      contents: read
+      packages: write
+
+    steps:
+      - name: Verify branch for registry push
+        if: ${{ github.event.inputs.push_to_registry == 'true' && github.ref != 'refs/heads/main' }}
+        env:
+          GH_REF: ${{ github.ref }}
+        run: |
+          echo "Registry push is only allowed from the main branch (current: ${GH_REF})"
+          exit 1
+
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Apptainer
+        uses: eWaterCycle/setup-apptainer@4bb22c52d4f63406c49e94c804632975787312b3   # v2
+        with:
+          apptainer-version: 1.4.5
+
+      - name: Normalize image name
+        id: normalize
+        env:
+          GH_REPO: ${{ github.repository }}
+          APP_NAME: ${{ matrix.app_name }}
+          RECIPE_NAME: ${{ matrix.recipe_name }}
+          ARCH: ${{ matrix.arch }}
+          GH_SHA: ${{ github.sha }}
+        run: |
+          # Create lowercase repository name for GHCR
+          REPO_LOWER=$(echo "${GH_REPO}" | tr '[:upper:]' '[:lower:]')
+
+          # Generate image name
+          IMAGE_NAME="${APP_NAME}-${RECIPE_NAME}"
+          IMAGE_PATH="${REGISTRY}/${REPO_LOWER}/${IMAGE_NAME}"
+          echo "image_path=$IMAGE_PATH" >> $GITHUB_OUTPUT
+
+          # Generate tag based on architecture and timestamp
+          TIMESTAMP="$(date +%Y%m%d)"
+          SHORT_SHA="$(echo "${GH_SHA}" | cut -c1-7)"
+          TAG="${ARCH}-${SHORT_SHA}-${TIMESTAMP}"
+          echo "tag=$TAG" >> $GITHUB_OUTPUT
+
+          # Also create a 'latest' tag for the architecture
+          LATEST_TAG="${ARCH}-latest"
+          echo "latest_tag=$LATEST_TAG" >> $GITHUB_OUTPUT
+
+          # SIF filename used across steps
+          SIF_NAME="${IMAGE_NAME}-${ARCH}.sif"
+          echo "sif_name=$SIF_NAME" >> $GITHUB_OUTPUT
+
+          echo "Building: ${IMAGE_NAME}:${TAG}"
+
+      - name: Build Apptainer container
+        env:
+          DEF_FILE: ${{ matrix.def_file }}
+        run: |
+          apptainer build \
+            --disable-cache \
+            "${{ steps.normalize.outputs.sif_name }}" \
+            "${DEF_FILE}"
+
+      - name: Test container
+        run: |
+          SIF="${{ steps.normalize.outputs.sif_name }}"
+          apptainer inspect "$SIF"
+          apptainer exec "$SIF" echo "Container runtime test successful"
+
+      - name: Login to GitHub Container Registry
+        if: ${{ github.event.inputs.push_to_registry == 'true' }}
+        env:
+          GH_ACTOR: ${{ github.actor }}
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          echo "${GH_TOKEN}" | \
+            apptainer registry login -u "${GH_ACTOR}" --password-stdin "oras://${REGISTRY}"
+
+      - name: Push to registry with versioned tag
+        if: ${{ github.event.inputs.push_to_registry == 'true' }}
+        run: |
+          apptainer push \
+            "${{ steps.normalize.outputs.sif_name }}" \
+            "oras://${{ steps.normalize.outputs.image_path }}:${{ steps.normalize.outputs.tag }}"
+
+      - name: Push to registry with latest tag
+        if: ${{ github.event.inputs.push_to_registry == 'true' }}
+        run: |
+          apptainer push \
+            "${{ steps.normalize.outputs.sif_name }}" \
+            "oras://${{ steps.normalize.outputs.image_path }}:${{ steps.normalize.outputs.latest_tag }}"
+
+      - name: Upload artifact
+        if: ${{ github.event.inputs.push_to_registry == 'false' && github.event.inputs.push_artifact == 'true' }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.app_name }}-${{ matrix.recipe_name }}-${{ matrix.arch }}-sif
+          path: ${{ steps.normalize.outputs.sif_name }}
+          retention-days: 2
+
+  summary:
+    name: Build Summary
+    needs: [discover, build]
+    if: always()
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check build results
+        env:
+          MATRIX_OUTPUT: ${{ needs.discover.outputs.matrix }}
+          BUILD_RESULT: ${{ needs.build.result }}
+          PUSH_TO_REGISTRY: ${{ github.event.inputs.push_to_registry }}
+          PUSH_ARTIFACT: ${{ github.event.inputs.push_artifact }}
+        run: |
+
+          case "${BUILD_RESULT}" in
+            skipped)
+              echo "Build was skipped"
+              ;;
+            success)
+              echo "All container builds completed successfully"
+              if [[ "$PUSH_TO_REGISTRY" == "true" ]]; then
+                echo "Containers pushed to ${REGISTRY}"
+              elif [[ "$PUSH_ARTIFACT" = "true" ]]; then
+                echo "Containers saved as workflow artifacts"
+              else
+                echo "Containers built but not pushed or saved"
+              fi
+              ;;
+          *)
+            echo "❌ Some builds failed"
+            exit 1
+          esac
