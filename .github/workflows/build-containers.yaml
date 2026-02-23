@@ -168,6 +168,8 @@ jobs:
           echo "matrix=${matrix_json}" >> $GITHUB_OUTPUT
           echo "Definition files to process:"
           echo "${matrix_json}" | jq .
+          echo "action: ${action}"
+          echo "pr:     ${pr_number:-}"
 
   build:
     name: Build ${{ matrix.recipe_name }} (${{ matrix.arch }})
