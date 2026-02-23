@@ -1,8 +1,7 @@
 values:
-  - name: "DepotSecret"
-    display_name: "An OCI authentication credential for CIQ Depot."
-    string_value: "secret://user/depot"
-    display_category: "Container"
+  - name: Container
+    display_name: Desktop container to use. Has to be compatible with this application
+    string_value: oras://ghcr.io/wresch/test-catalog/desktop-vnc:1.0-pr3-amd64
   - name: "Cores"
     display_name: "How many CPU cores to allocate."
     uint_value: 2
@@ -15,11 +14,11 @@ values:
     display_name: "Disallow other jobs from using the same node/instance."
     bool_value: false
     display_category: "Scheduling"
-  - name: "Timeout"
-    display_name: "Maximum runtime."
-    string_value: "12h"
-    display_category: "Execution"
-  - name: "Volume"
+  - name: "DataVolume"
     display_name: "Where to store data."
     string_value: "volume://user/ephemeral"
+    display_category: "Storage"
+  - name: "HomeVolume"
+    display_name: "Volume to use as your home directory"
+    string_value: ""
     display_category: "Storage"

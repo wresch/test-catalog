@@ -20,6 +20,8 @@ dnf -y install procps-ng perl turbovnc novnc firefox \
   nvtop htop procps-ng bat ripgrep fzf
 dnf clean all -y
 rm /etc/xdg/autostart/xfce-polkit.desktop
+curl -sSfL https://raw.githubusercontent.com/bootandy/dust/refs/heads/master/install.sh | sh
+
 
 cat >/etc/xdg/xfce4/xfconf/xfce-perchannel-xml/xfce4-screensaver.xml <<__EOF__
 <?xml version="1.0" encoding="UTF-8"?>
@@ -36,12 +38,13 @@ cat >/etc/xdg/xfce4/xfconf/xfce-perchannel-xml/xfce4-screensaver.xml <<__EOF__
 __EOF__
 
 cat >/usr/local/bin/start-vncserver.sh <<'__EOF__'
+#!/bin/sh
 /usr/bin/novnc_proxy --vnc localhost:5900 --listen ${1:-6080} &
 PROXY=$?
 /opt/TurboVNC/bin/vncserver -securitytypes tlsnone,x509none,none -wm xfce -fg ${VNCSERVER_ARGS} :0
 kill $PROXY
 __EOF__
-
+chmod +x /usr/local/bin/start-vncserver.sh
 %runscript
 
 

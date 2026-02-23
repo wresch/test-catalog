@@ -2,9 +2,9 @@
 {{- $datavol := trim .DataVolume }}
 {{- $homevol := trim .HomeVolume }}
 {{- $datamount := "/data" }}
-{{- $home := "/fbhome" }}
+{{- $home := "/home/fb" }}
 {{- if not $homevol }}
-  {{ $home = "/tmp/fbhome" }}
+  {{ $home = "/tmp/homefb" }}
 {{- end }}
 {{- $port := randInt 10000 32000 }}
 
@@ -23,7 +23,7 @@ volumes:
 {{- end }}
 
 services:
-  desktop:
+  vnc:
 {{- if (or $datavol $homevol) }}
     mounts:
   {{- if $datavol }}
@@ -50,12 +50,11 @@ services:
     env:
       - HOME={{ $home }}
     image:
-      uri: oras://depot.ciq.com/fuzzball/fuzzball-applications/xfce4-desktop.sif
-      secret: {{ .DepotSecret }}
+      uri: {{ .Container }}
     script: |
       #! /bin/sh
       mkdir -p "$HOME"
-      /usr/local/bin/start-vncserver.sh {{ $port }}
+      /usr/local/bin/start-vncserver.sh {{ $port }} || true
     resource:
       cpu:
         cores: {{ .Cores }}
