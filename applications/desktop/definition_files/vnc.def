@@ -1,3 +1,4 @@
+# tag: 1.0
 Bootstrap: docker
 From: rockylinux/rockylinux:9
 
@@ -12,7 +13,7 @@ dnf upgrade -y
 dnf install -y epel-release && crb enable
 dnf groupinstall -y Xfce --exclude=xfce4-power-manager
 dnf -y install procps-ng perl turbovnc novnc firefox \
-  baobab openssh-clients tree vim-enhanced ripgrep curl wget which bash awscli2 \
+  baobab openssh-clients tree vim-enhanced ripgrep wget which bash awscli2 \
   jq jello python3.12 ca-certificates \
   java-21-openjdk iputils bind-utils \
   nvtop htop procps-ng bat ripgrep fzf
