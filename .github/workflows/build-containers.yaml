@@ -164,7 +164,7 @@ jobs:
 
             for arch in amd64 arm64; do
 
-              item="$(jq -n \
+              item="$(jq -cn \
                 --arg df "$file" \
                 --arg an "$app_name" \
                 --arg rn "$recipe_name" \
