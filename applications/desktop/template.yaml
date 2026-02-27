@@ -1,6 +1,13 @@
-
+# Copyright 2025 CIQ, Inc. All rights reserved.
 {{- $datavol := trim .DataVolume }}
 {{- $homevol := trim .HomeVolume }}
+{{- if and $datavol (not (hasPrefix "volume://" $datavol)) }}
+  {{- fail (printf "DataVolume must start with 'volume://', got %q" $datavol) }}
+{{- end }}
+{{- if and $homevol (not (hasPrefix "volume://" $homevol)) }}
+  {{- fail (printf "HomeVolume must start with 'volume://', got %q" $homevol) }}
+{{- end }}
+
 {{- $datamount := "/data" }}
 {{- $home := "/home/fb" }}
 {{- if not $homevol }}
@@ -52,13 +59,13 @@ services:
     image:
       uri: {{ .Container }}
     script: |
-      #! /bin/sh
+      #!/bin/sh
       mkdir -p "$HOME"
-      /usr/local/bin/start-vncserver.sh {{ $port }} || true
+      echo "Starting desktop and vnc"
+      /usr/local/bin/start-vncserver.sh {{ $port }}
     resource:
       cpu:
         cores: {{ .Cores }}
       memory:
         size: {{ .Memory }}
       exclusive: {{ .Exclusive }}
-
