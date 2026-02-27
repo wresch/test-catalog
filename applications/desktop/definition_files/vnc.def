@@ -1,4 +1,4 @@
-# tag: 1.1
+# tag: 1.2
 
 Bootstrap: docker
 From: rockylinux/rockylinux:9
@@ -50,8 +50,9 @@ cp "$(find . -name "dust" | head -n 1)" /usr/local/bin/dust
 chmod +x /usr/local/bin/dust
 rm -rf ./*
 
-# xfce config
-
+###
+### xfce config
+###
 
 # theming
 git clone --depth 1 https://github.com/daniruiz/flat-remix-gtk.git
@@ -132,7 +133,3 @@ chmod +x /usr/local/bin/start-vncserver.sh
 # /etc/skel/.config/xfce4/xfconf/xfce-perchannel-xml/xfce4-desktop.xml
 
 %runscript
-
-
-
-
