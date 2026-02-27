@@ -27,18 +27,14 @@
 #
 # workflow_dispatch:
 #   Force-rebuilds all .def files for a named application (required input).
-#   Can be run on any branch. Since all commits are expected to arrive via PRs
-#   (enforced by branch protection), the resulting image will always carry a
-#   PR-scoped tag (<version>-pr<N>-<arch>). There is no automated path to
-#   produce a plain release tag (<version>-<arch>) via this trigger. If a
-#   release-tagged image is needed on a non-main branch (e.g. a hotfix), run
-#   workflow_dispatch to build the image and then retag it manually with ORAS:
-#
-#     oras tag <image>:<version>-pr<N>-<arch> <version>-<arch>
+#   On main, images are tagged with a plain release tag (<version>-<arch>).
+#   On feature branches, images carry a PR-scoped tag (<version>-pr<N>-<arch>)
+#   if a PR is associated with the HEAD commit; otherwise the plain tag is used.
+#   Blocked on release branches (v<major>.<minor>). Builds should happen on main
+#   and templates should then be backported without having to rebuild containers.
 #
 # BACKPORTS
 #   PRs targeting branches other than main do not trigger this workflow.
-#   Use workflow_dispatch to rebuild manually on a release branch if needed.
 #
 # IMAGE PATH
 #   ghcr.io/<org>/<repo>/<app_name>-<recipe_name>:<tag>-<arch>
@@ -108,16 +104,32 @@ jobs:
 
             push)
               action="retag"
-              pr_number=$(gh api "repos/${GH_REPO}/commits/${GH_SHA}/pulls" \
-                --jq '.[0].number // empty')
+              # The commits/{sha}/pulls endpoint is unreliable for merge
+              # commits (race condition with GitHub's indexing). Instead,
+              # query recently closed PRs and match by merge_commit_sha.
+              pr_number=$(gh api "repos/${GH_REPO}/pulls?state=closed&sort=updated&direction=desc&per_page=10" \
+                | jq -r --arg sha "${GH_SHA}" 'map(select(.merge_commit_sha == $sha)) | .[0].number // empty')
               mapfile -t files < <(git diff --name-only "${BEFORE_SHA}" HEAD \
                 -- ":(glob)applications/*/definition_files/*.def" 2>/dev/null || true)
               ;;
 
             workflow_dispatch)
+              # sanitize input
+              if [[ ! "${APP_INPUT}" =~ ^[a-zA-Z0-9_-]+$ ]]; then
+                echo "::error::Invalid application name '${APP_INPUT}'"
+                exit 1
+              fi
+              # Release branches only receive backports/cherry-picks via PRs
+              if [[ "${GITHUB_REF}" =~ ^refs/heads/v[0-9]+\.[0-9]+$ ]]; then
+                echo "::error::workflow_dispatch is not supported on release branches (${GITHUB_REF#refs/heads/}). Use a PR to backport changes."
+                exit 1
+              fi
               action="build"
-              pr_number=$(gh api "repos/${GH_REPO}/commits/${GH_SHA}/pulls" \
-                --jq '.[0].number // empty')
+              # On main, produce release tags; on feature branches, add PR scope
+              if [[ "${GITHUB_REF}" != "refs/heads/main" ]]; then
+                pr_number=$(gh api "repos/${GH_REPO}/commits/${GH_SHA}/pulls" \
+                  --jq '.[0].number // empty')
+              fi
               mapfile -t files < <(find "applications/${APP_INPUT}/definition_files" \
                 -name "*.def" 2>/dev/null || true)
               ;;
@@ -144,21 +156,28 @@ jobs:
             recipe_name="$(basename "${parts[3]}" .def)"
 
             # Version must be declared as '# tag: <version>' in the .def file
-            version="$(perl -nle 'if (m/^#\s*tag\s*:\s*(\S+)/){print $1; exit}' < "${file}")"
+            version="$(perl -nle 'if (m/^#\s*tag\s*:\s*([A-Za-z0-9_.-]{1,128})/){print $1; exit}' < "${file}")"
             if [[ -z "${version}" ]]; then
               echo "'${file}' is missing a '# tag: <version>' comment - skipping"
               continue
             fi
 
-            #for arch in amd64 arm64; do
-            ## TODO: for now just do amd64 builds - no need to waste cycles
-            for arch in amd64; do  
+            for arch in amd64 arm64; do
+
+              item="$(jq -n \
+                --arg df "$file" \
+                --arg an "$app_name" \
+                --arg rn "$recipe_name" \
+                --arg v "$version" \
+                --arg arch "$arch" \
+                '{def_file:$df,app_name:$an,recipe_name:$rn,version:$v,arch:$arch}' \
+              )"
               if [[ "${first}" == "true" ]]; then
                 first="false"
+                matrix_json+="${item}"
               else
-                matrix_json+=','
+                matrix_json+=",${item}"
               fi
-              matrix_json+="{\"def_file\":\"${file}\",\"app_name\":\"${app_name}\",\"recipe_name\":\"${recipe_name}\",\"version\":\"${version}\",\"arch\":\"${arch}\"}"
             done
           done
           matrix_json+=']}'
@@ -172,6 +191,10 @@ jobs:
           echo "pr:     ${pr_number:-}"
 
   build:
+    # NOTE: ARM64 builds require a runner with the `ubuntu-24.04-arm64` label.
+    # Ensure that a suitable self-hosted or custom-labeled ARM64 runner is
+    # configured in this repository or organization, otherwise ARM64 jobs
+    # will fail to start with a "no matching runner" error.
     name: Build ${{ matrix.recipe_name }} (${{ matrix.arch }})
     needs: discover
     if: needs.discover.outputs.action == 'build' && needs.discover.outputs.matrix != '{"include":[]}'
@@ -264,7 +287,7 @@ jobs:
 
     steps:
       - name: Set up ORAS
-        uses: oras-project/setup-oras@v1  # TODO: pin to commit SHA
+        uses: oras-project/setup-oras@c33dd380c4b2a301e8fd9e4772bf5c1556527afd  # v1-14-gc33dd38
 
       - name: Retag image
         env:
@@ -288,6 +311,12 @@ jobs:
           DEST_TAG="${VERSION}-${ARCH}"
 
           echo "${GH_TOKEN}" | oras login -u "${GH_ACTOR}" --password-stdin "${REGISTRY}"
+
+          # Verify that the source image exists before attempting to retag
+          if ! oras manifest fetch "${IMAGE_PATH}:${SOURCE_TAG}" >/dev/null 2>&1; then
+            echo "::error::Source image '${IMAGE_PATH}:${SOURCE_TAG}' does not exist or is not accessible"
+            exit 1
+          fi
+
           echo "Retagging ${IMAGE_PATH}:${SOURCE_TAG} → ${DEST_TAG}"
           oras tag "${IMAGE_PATH}:${SOURCE_TAG}" "${DEST_TAG}"
-
