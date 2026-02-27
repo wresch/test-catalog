@@ -55,10 +55,10 @@ rm -rf ./*
 
 # theming
 git clone --depth 1 https://github.com/daniruiz/flat-remix-gtk.git
-cp -r flat-remix-gtk/themes/Flat-Remix-GTK-Green-Dark/ /usr/share/themes
+cp -r flat-remix-gtk/themes/Flat-Remix-GTK-Blue-Dark/ /usr/share/themes
 
 git clone --depth 1 https://github.com/daniruiz/flat-remix.git
-cp -r flat-remix/Flat-Remix-Green-Dark /usr/share/icons
+cp -r flat-remix/Flat-Remix-Blue-Dark /usr/share/icons
 
 cat >/etc/xdg/xfce4/xfconf/xfce-perchannel-xml/xfce4-screensaver.xml <<__EOF__
 <?xml version="1.0" encoding="UTF-8"?>
