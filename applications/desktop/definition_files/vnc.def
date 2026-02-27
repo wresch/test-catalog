@@ -33,7 +33,7 @@ dnf -y install procps-ng perl turbovnc novnc firefox \
   java-21-openjdk iputils bind-utils \
   nvtop htop procps-ng bat ripgrep fzf \
   parole vim-X11 zip tar gzip pigz git \
-  rocky-backgrounds
+  rocky-backgrounds gstreamer1-plugin-openh264 fastfetch
 dnf clean all -y
 rm /etc/xdg/autostart/xfce-polkit.desktop
 
@@ -77,8 +77,8 @@ cat >/etc/xdg/xfce4/xfconf/xfce-perchannel-xml/xsettings.xml <<__EOF__
 <?xml version="1.0" encoding="UTF-8"?>
 <channel name="xsettings" version="1.0">
   <property name="Net" type="empty">
-    <property name="ThemeName" type="string" value="Flat-Remix-GTK-Green-Dark"/>
-    <property name="IconThemeName" type="string" value="Flat-Remix-Green-Dark"/>
+    <property name="ThemeName" type="string" value="Flat-Remix-GTK-Blue-Dark"/>
+    <property name="IconThemeName" type="string" value="Flat-Remix-Blue-Dark"/>
   </property>
   <property name="Gtk" type="empty">
     <property name="FontName" type="string" value="Sans 10"/>
